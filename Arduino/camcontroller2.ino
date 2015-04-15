@@ -48,6 +48,7 @@ boolean usingInterrupt = false;
 void useInterrupt(boolean); // Func prototype keeps Arduino 0023 happy
 char lastNMEA[120] = "";
 
+unsigned long lastMillis = 0; // millis when time was updated last
 
 long distance = 0; // keeps track of position [mm]
 boolean reverse = false; // direction of movement
@@ -60,7 +61,7 @@ Statistic speedStats;
 #define maxAllowedSpeed 2000
 
 Metro speedMetro = Metro(100); // speed update interval, ms
-Metro updateMetro = Metro(250); // display update interval, ms
+Metro updateMetro = Metro(500); // display update interval, ms
 Metro gpsMetro = Metro(10); // gps update interval, ms
 Metro setTimeMetro = Metro(240000); // set time interval, ms
 
@@ -199,10 +200,10 @@ void updatePanel(){
   strcat(buff, str);
   
   strcat(buff, ",latitude:");
-  dtostrf(GPS.latitude/100, 9, 6, str);
+  dtostrf(GPS.latitudeDegrees, 9, 6, str);
   strcat(buff, str);
   strcat(buff, ",longitude:");
-  dtostrf(GPS.longitude/100, 9, 6, str);
+  dtostrf(GPS.longitudeDegrees, 9, 6, str);
   strcat(buff, str);
     
   strcat(buff, ",datetime:\"");
@@ -263,7 +264,7 @@ void gpsSetup(){
   
   // Switching to 4800 baud
   /*
-  /GPS.begin(9600);
+  GPS.begin(9600);
   GPS.sendCommand(PMTK_SET_BAUD_4800);
   delay(1000);
   */
@@ -311,9 +312,9 @@ boolean gpsUpdate(){
     }
     
     // send GPS-data to camera
-    Serial2.write(lastNMEA);
-    Serial2.write("\n");
-    delay(100);
+    //Serial2.write(lastNMEA);
+    //Serial2.write("\n");
+    //delay(100);
     //Serial.println(lastNMEA);
   }
   return true;
@@ -368,6 +369,7 @@ void useInterrupt(boolean v) {
 // set time from GPS-time
 void setTimeFromGPS(){
   setTime(GPS.hour, GPS.minute, GPS.seconds, GPS.day, GPS.month, GPS.year); 
+  lastMillis = millis();
 }
 
 // Creates as formated c-string of last GPS date and time, 2014-14-01 09:10:11
@@ -384,7 +386,7 @@ void dateTimeString(char *buff, time_t datetime){
                   month(datetime), 
                   day(datetime), 
                   hour(datetime), 
-                  minute(datetime), 
+                  minute(datetime),
                   second(datetime));
 }
 
@@ -396,15 +398,17 @@ void csvString(char *buff, time_t datetime, boolean header){
   strcpy (buff, "");
   
   if (header){
-    strcat(buff, "counter,datetime,distance,speed,latitude,longitude");
+    strcat(buff, "counter,datetime,millis,distance,wheelspeed,latitude,longitude,latdeg,longdeg,altitude,geoidheight,speed,angle,HDOP,fixquality,satellites,flasherrcount");
   } else {
-    sprintf(str, "%0004d,", camera.counter());
+    sprintf(str, "%00005d,", camera.counter());
     strcat(buff, str);
     
     dateTimeString(str, datetime);
     strcat(buff, str);
     strcat(buff, ",");
-
+    sprintf(str, "%0003d,", (millis() - lastMillis) % 1000);
+    strcat(buff, str);
+ 
     dtostrf(distance / 1000.0, 0, 2, str);
     strcat(buff, str);
     strcat(buff, ",");
@@ -413,12 +417,40 @@ void csvString(char *buff, time_t datetime, boolean header){
     strcat(buff, str);
     strcat(buff, ",");  
     
-    dtostrf(GPS.latitude/100, 9, 6, str);
+    dtostrf(GPS.latitude, 9, 4, str);
     strcat(buff, str);
     strcat(buff, ",");
-    dtostrf(GPS.longitude/100, 9, 6, str);
+    dtostrf(GPS.longitude, 9, 4, str);
+    strcat(buff, str);
+    strcat(buff, ",");
+    dtostrf(GPS.latitudeDegrees, 10, 6, str);
+    strcat(buff, str);
+    strcat(buff, ",");
+    dtostrf(GPS.longitudeDegrees, 10, 6, str);
+    strcat(buff, str);
+    strcat(buff, ",");
+    dtostrf(GPS.altitude, 6, 2, str);
+    strcat(buff, str);
+    strcat(buff, ",");
+    dtostrf(GPS.geoidheight, 6, 2, str);
+    strcat(buff, str);
+    strcat(buff, ",");
+    dtostrf(GPS.speed, 6, 2, str);
+    strcat(buff, str);
+    strcat(buff, ",");
+    dtostrf(GPS.angle, 5, 1, str);
+    strcat(buff, str);
+    strcat(buff, ",");
+    dtostrf(GPS.HDOP, 4, 2, str);
+    strcat(buff, str);
+    strcat(buff, ",");
+    sprintf(str, "%01d,", GPS.fixquality);
+    strcat(buff, str);
+    sprintf(str, "%002d,", GPS.satellites);
     strcat(buff, str);
 
+    sprintf(str, "%002d", flashErrCount);
+    strcat(buff, str);
   }
 
   strcat(buff, "\r\n");
@@ -447,7 +479,7 @@ boolean checkCamera(boolean force){
       time_t time = now();
       camera.capture();
       camCounter = 0;
-      char buff[255] = "";
+      char buff[512] = "";
       csvString(buff, time, false);
       Serial.print("&LOG="); Serial.print(buff);
       result = true;
